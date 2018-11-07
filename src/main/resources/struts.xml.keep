@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!DOCTYPE struts PUBLIC 
+    "-//Apache Software Foundation//DTD Struts Configuration 2.0//EN"
+    "http://struts.apache.org/dtds/struts-2.0.dtd">
+  
+<struts>
+	<constant name="struts.action.extension" value="do"></constant>
+	
+	<package name="noLogin" namespace="/" extends="struts-default">
+        <action name="login" class="com.cernet.web.action.LoginAction" method="login">
+            <result name="success">/index.jsp</result>
+            <result name="error" >/login.jsp</result>
+        </action>
+        <action name="loginOut" class="com.cernet.web.action.LoginAction" method="loginOut">
+            <result name="success">/login.jsp</result>
+        </action>
+    </package>
+	
+	<package name="default" extends="struts-default">
+	
+		<interceptors>
+            <interceptor class="com.cernet.vipbw.interceptor.LoginInterceptor" name="authority"/>
+            
+            <interceptor-stack name="mydefault">
+                <interceptor-ref name="defaultStack"/>
+                <interceptor-ref name="authority"/>
+            </interceptor-stack>
+        </interceptors> 
+        
+        <default-interceptor-ref name="mydefault" />
+		 <global-results>
+            <result name="login">/login.jsp</result>
+            <result name="exception">/WEB-INF/pages/exception.jsp</result>
+            <result name="error">/WEB-INF/pages/error.jsp</result>
+        </global-results>
+	
+	
+	    <action name="search" class="com.cernet.web.action.SearchAction" method="search">
+			<result name="success">/WEB-INF/jsp/search.jsp</result>
+		</action>
+		<action name="searchresult" class="com.cernet.web.action.SearchAction" method="searchresult">
+			<result name="success">/WEB-INF/jsp/searchResult.jsp</result>
+		</action>
+		<action name="auditTrace" class="com.cernet.web.action.SearchAction" method="auditTrace">
+			<result name="success" type="redirect">searchresult.do?traceResultid=${traceResultid}</result>
+		</action>
+		<action name="searchResultPro" class="com.cernet.web.action.SearchAction" method="searchResultPro">
+			<result name="success" >/WEB-INF/jsp/searchResultPro.jsp</result>
+		</action>
+		<action name="searchHistory" class="com.cernet.web.action.SearchAction" method="searchHistory">
+			<result name="success">/WEB-INF/jsp/searchHistory.jsp</result>
+		</action>
+		<action name="synchronous" class="com.cernet.web.action.SearchAction" method="synchronous">
+			<result name="success">/WEB-INF/jsp/search.jsp</result>
+		</action>
+	</package>
+</struts>

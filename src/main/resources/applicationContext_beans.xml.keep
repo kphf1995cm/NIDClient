@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-2.0.xsd">
+	 
+	 <bean id="loginDao" class="com.cernet.dao.impl.LoginDaoHibernate">
+        <property name="sessionFactory" ref="sessionFactory"/>
+    </bean>
+    
+    <bean id="loginManager" class="com.cernet.service.impl.LoginManagerImpl">
+        <constructor-arg ref="loginDao"/>
+    </bean> 
+     <bean id="adminDao" class="com.cernet.dao.impl.AdminDaoHibernate">
+        <property name="sessionFactory" ref="sessionFactory"/>
+    </bean>
+    
+    <bean id="adminManager" class="com.cernet.service.impl.AdminManagerImpl">
+        <constructor-arg ref="adminDao"/>
+    </bean> 
+    
+    <bean id="domainDao" class="com.cernet.dao.impl.DomainDaoHibernate">
+        <property name="sessionFactory" ref="sessionFactory"/>
+    </bean>
+    
+    <bean id="domainManager" class="com.cernet.service.impl.DomainManagerImpl">
+        <constructor-arg ref="domainDao"/>
+    </bean> 
+     <bean id="groupDao" class="com.cernet.dao.impl.GroupDaoHibernate">
+        <property name="sessionFactory" ref="sessionFactory"/>
+    </bean>
+    
+    <bean id="groupManager" class="com.cernet.service.impl.GroupManagerImpl">
+        <constructor-arg ref="groupDao"/>
+    </bean> 
+     <bean id="ideaDao" class="com.cernet.dao.impl.IdeaDaoHibernate">
+        <property name="sessionFactory" ref="sessionFactory"/>
+    </bean>
+    
+    <bean id="ideaManager" class="com.cernet.service.impl.IdeaManagerImpl">
+        <constructor-arg ref="ideaDao"/>
+    </bean> 
+     <bean id="traceLogDao" class="com.cernet.dao.impl.TraceLogDaoHibernate">
+        <property name="sessionFactory" ref="sessionFactory"/>
+    </bean>
+    
+    <bean id="traceLogManager" class="com.cernet.service.impl.TraceLogManagerImpl">
+        <constructor-arg ref="traceLogDao"/>
+    </bean> 
+    
+     <bean id="traceResultDao" class="com.cernet.dao.impl.TraceResultDaoHibernate">
+        <property name="sessionFactory" ref="sessionFactory"/>
+    </bean>
+    
+    <bean id="traceResultManager" class="com.cernet.service.impl.TraceResultManagerImpl">
+        <constructor-arg ref="traceResultDao"/>
+    </bean> 
+    
+    <bean id="nidDao" class="com.cernet.dao.impl.NidDaoHibernate">
+        <property name="sessionFactory" ref="sessionFactory"/>
+    </bean>
+    
+    <bean id="nidManager" class="com.cernet.service.impl.NidManagerImpl">
+        <constructor-arg ref="nidDao"/>
+    </bean> 
+</beans>
+

@@ -1,0 +1,1195 @@
+package com.cernet.web.action;
+
+import java.math.BigInteger;
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import javax.ws.rs.core.Request;
+
+import net.sf.json.JSONObject;
+
+import org.apache.cxf.jaxws.JaxWsProxyFactoryBean;
+import org.displaytag.properties.SortOrderEnum;
+import org.hibernate.criterion.DetachedCriteria;
+import org.hibernate.criterion.Order;
+import org.hibernate.criterion.Restrictions;
+
+import com.cernet.model.Domain;
+import com.cernet.model.Group;
+import com.cernet.model.Idea;
+import com.cernet.model.Nid;
+import com.cernet.model.TraceLog;
+import com.cernet.model.TraceResult;
+import com.cernet.model.User;
+import com.cernet.service.DomainManager;
+import com.cernet.service.GroupManager;
+import com.cernet.service.IdeaManager;
+import com.cernet.service.NidManager;
+import com.cernet.service.TraceLogManager;
+import com.cernet.service.TraceResultManager;
+import com.cernet.soa.NidServer;
+import com.cernet.util.CXFClientUtil;
+import com.cernet.util.Config;
+import com.cernet.util.ConvertUtil;
+import com.cernet.util.DateUtil;
+import com.cernet.util.EncryptUtils;
+import com.cernet.util.NaideaTimer;
+import com.cernet.util.PaginatedListImpl;
+
+
+
+
+
+/**
+ *
+ * @author Administrator
+ */
+public class SearchAction extends BaseAction{
+	private DomainManager domainManager;
+	private IdeaManager ideaManager;
+	private GroupManager groupManager;
+	private TraceLogManager traceLogManager;
+	private NidManager nidManager;
+	private TraceResultManager traceResultManager;
+	private TraceResult traceResult;
+	
+	String ipaddr;//用于获取界面的IP地址
+	User user;//用于接收SOA传回来的user对象
+	String messString;//用于到界面显示错误信息
+	String aidTimeString;//用于显示aidTime入网时间
+	String lastNid;//用于传到SOA中的参数
+	String lastHashMac;//用于传到SOA中的参数hashMac
+	String nidGroupName;//用于存放NID所属学校，域内
+	String ipGroupName;//用于存放IP所属学校，域间时显示
+    String loginType;//登录类型，为域间out还是域内in
+    String flag = "0";//1表示idea+time,2表示idea+mac
+    List<TraceLog> traceLogsList;
+    List<TraceResult> traceResultList;
+    private PaginatedListImpl plist;
+    
+    private int page=1;
+    private int fullSize=0;
+    
+    private Date createTime;
+    
+    
+    /*
+     * 手动同步数据
+     */
+    public String synchronous(){
+    	NaideaTimer naideaTimer=new NaideaTimer(groupManager,ideaManager);
+    	try {
+			naideaTimer.synchronous();
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			setMessString("同步数据失败！");
+			return SUCCESS;
+		}
+    	setMessString("同步数据成功！");
+    	return SUCCESS;
+    }
+    
+    /*
+     * 查看追溯结果详细信息操作
+     */
+    public String searchResultPro(){
+    	String traceResultid = getRequest().getParameter("traceResultid");
+    	traceResult = traceResultManager.get(Long.parseLong(traceResultid));//根据id查询追溯结果详细信息
+    	return SUCCESS;
+    }
+    /*
+     * 审核操作
+     */
+    public String auditTrace(){
+    	
+    	String traceResultid = getRequest().getParameter("traceResultid");
+    	getRequest().setAttribute("traceResultid", traceResultid);
+    	//DetachedCriteria queryCriteria = DetachedCriteria.forClass(TraceResult.class);
+    	traceResult = traceResultManager.get(Long.parseLong(traceResultid));//根据id查询追溯结果一条记录作审核
+    	String ipAddress = traceResult.getTracedIp();
+    	getRequest().getSession().removeAttribute("messages");
+    	saveMessage("审核成功");
+		initAll();//初始化所有变量为空串
+		InetAddress address = null;
+		try {
+			address = Inet6Address.getByName(ipAddress);
+		} catch (UnknownHostException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			return SUCCESS;
+		}
+		String ipv6Addr = address.toString().substring(1);//去掉前面的/
+    	//追溯
+    	traceresult(ipv6Addr);
+    	
+    	//将追溯结果保存到traceresult表中
+    	if(null != this.user){
+    		if(null != this.loginType && !(this.loginType.equals(""))){
+    			traceResult.setTraceType(this.loginType);//登录类型，in域内登录，out域间登录
+    		}
+    		traceResult.setNidGroupName(nidGroupName);//保存哪个NIDGROUPNAME
+    		traceResult.setIpGroupName(ipGroupName);//域间保存IPGROUPNAME
+			traceResult.setLoginStyle(this.user.getClientType());//登录方式loginStyle,1学号，2手机，不为1不为2NID
+			traceResult.setIdentityId(this.user.getIdentityId());//一个身份证信息identityId
+			traceResult.setClientName(this.user.getClientName());//添加一个学号clientName
+			traceResult.setMobile(this.user.getMobile());//添加一个手机号mobile
+			traceResult.setDidName(this.user.getDidName());//添加一个姓名didName
+			traceResult.setDidAddr(this.user.getDidAddr());//添加一个籍惯didAddr
+			traceResult.setApName(this.user.getApName());//添加一个apName
+			traceResult.setSwitchIp(this.user.getIpAddr());//添加一个交换机IP  switchip
+			traceResult.setDidstr(this.user.getUserName());//soa返回的DID
+			if(this.user.getApName().equals("")){
+				traceResult.setInType("1");//有线接入
+			}else{
+				traceResult.setInType("2");//无线接入
+			}
+			if(null != this.user.getPort() && this.user.getPort() != 0){
+				traceResult.setPort( this.user.getPort());
+			}
+			if(flag.equals("1")){//idea+time
+				traceResult.setIdearType("time");
+    		}else if(flag.equals("2")){//idea+mac
+    			traceResult.setIdearType("mac");
+    		}
+			traceResult.setMac(this.user.getMacAddr());// soa返回的MAC
+    		traceResult.setNid(lastNid);//解密得到的nid
+    		if(flag.equals("1")){//idea+time
+    			traceResult.setTimeDate(aidTimeString);
+    		}else if(flag.equals("2")){//idea+mac
+    			//String curAidTimeString = aidTimeString + "-01 00:00:00";
+    			traceResult.setTimeDate(aidTimeString);
+    		}
+    		String userName = (String) getSession().getAttribute("username");
+    		traceResult.setAuditOpr(userName);//审核人
+    		traceResultManager.save(traceResult);
+    	}else{
+    		getRequest().getSession().removeAttribute("messages");
+    		saveMessage("追溯结果为空");
+    		
+    	}
+    	
+    	return SUCCESS;
+    }
+    
+    /**
+     * 追溯
+     * @param ipAddress
+     */
+	private void traceresult(String ipAddress) {
+		ipaddr = ipAddress;
+		
+		String prefix = getPrefix(ipAddress);//前缀共64位用:号分隔，冒号与冒号间存在0不显示
+		String suffix = getSuffix(ipAddress);//后缀共64位，每个冒号之前默认4位，不足4位在前面补0
+		
+	    System.out.println("前缀64prefix: "+prefix);
+	    System.out.println("后缀64suffix: "+suffix);
+	    //根据前缀64位到domain表中找对应的naIP
+	    DetachedCriteria queryCriteria = DetachedCriteria.forClass(Domain.class);
+		queryCriteria.add(Restrictions.eq("ipAddress", prefix));
+		List<Domain> domainList = domainManager.getListByDetachedCriteria(queryCriteria);
+		if(null != domainList && domainList.size() > 0){
+			Domain domain = domainList.get(0);
+			String naIp = domain.getNaIp();
+			try {
+				setUserInfo(naIp,suffix);
+			} catch (Exception e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+				getRequest().getSession().removeAttribute("messages");
+				saveMessage("追溯结果为空");
+			}//设置lastNid,lastMac的值80002b5cbc1894dd
+			//setUserInfo(naIp,"80002b5cbc1894dd");
+			//String lastNid = "80002bc6d8";//测试
+
+		}else{
+			getRequest().getSession().removeAttribute("messages");
+			saveMessage("追溯结果为空");
+			
+		}
+	}
+
+	/**
+	 * 此方法用于根据IPV6查询用户信息
+	 * @return
+	 */
+	public String search(){
+		setMessString("");
+		initAll();//初始化所有变量为空串
+		ipaddr = getRequest().getParameter("ipaddr");//2001:da8:24d:0:0257:7d40:744e:eba0
+		if(null != ipaddr && !ipaddr.equals("")){
+			//ipaddr = "2001:da8:24d:0:0257:7d40:744e:eba0";
+			InetAddress address = null;
+			try {
+				address = Inet6Address.getByName(ipaddr);
+			} catch (UnknownHostException e) {
+				e.printStackTrace();
+				getRequest().getSession().setAttribute("menuName", "search");
+				setMessString("所输地址不符合IPV6地址格式，请重新输入");
+				
+				return SUCCESS;
+			}
+			if(!(address instanceof Inet6Address)){
+				getRequest().getSession().setAttribute("menuName", "search");
+				setMessString("所输地址不符合IPV6地址格式，请重新输入");
+				return SUCCESS;
+			}
+			int usertype = ((Integer) getSession().getAttribute("usertype")).intValue();
+			if(usertype == 0){//管理员
+				String ipv6Addr = address.toString().substring(1);//去掉前面的/
+				
+				String prefix = getPrefix(ipv6Addr);//前缀共64位用:号分隔，冒号与冒号间存在0不显示
+				String suffix = getSuffix(ipv6Addr);//后缀共64位，每个冒号之前默认4位，不足4位在前面补0
+				
+			    System.out.println("前缀64prefix: "+prefix);
+			    System.out.println("后缀64suffix: "+suffix);
+			    
+			    //根据前缀64位到domain表中找对应的naIP
+			    DetachedCriteria queryCriteria = DetachedCriteria.forClass(Domain.class);
+				queryCriteria.add(Restrictions.eq("ipAddress", prefix));
+				List<Domain> domainList = domainManager.getListByDetachedCriteria(queryCriteria);
+				if(null != domainList && domainList.size() > 0){
+					Domain domain = domainList.get(0);
+					String naIp = domain.getNaIp();
+					try {
+						setUserInfo(naIp,suffix);
+					} catch (Exception e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+						setMessString("您的查询结果为空");
+					}//设置lastNid,lastMac的值80002b5cbc1894dd
+					//setUserInfo(naIp,"80002b5cbc1894dd");
+					//String lastNid = "80002bc6d8";//测试
+
+				}else{
+					setMessString("您的查询结果为空");
+					
+				}
+			}else if(usertype == 1){//普通用户
+				String userName = (String) getSession().getAttribute("username");
+				//首先查看当前用户是否已经申请过此IP
+				List<TraceResult> traceResultlistList = traceResultManager.getTraceResultByPara(ipaddr,userName);
+				if(null != traceResultlistList && traceResultlistList.size() > 0){
+					setMessString("此IP已经审请过了，请到追溯查询中查询结果");
+					
+				}else{
+					setMessString("申请成功，稍后在追溯查询中查询结果");
+					try {
+						//普通用户则提交追溯申请保存到NT_TRACE_RESULT
+						traceResult = new TraceResult();
+						traceResult.setTracedIp(ipaddr);//ip地址
+						traceResult.setAddOpr(userName);//申请人
+						traceResultManager.save(traceResult);
+					} catch (Exception e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+						setMessString("申请失败");
+						
+					}
+					
+					//保存日志信息
+					TraceLog traceLog = new TraceLog();
+					traceLog.setTracedIp(ipaddr);
+					traceLog.setCreateTime(new Date());
+					traceLog.setAddOpr(userName);//申请人
+					traceLogManager.save(traceLog);
+					
+					
+				}	
+			}
+		}
+		getRequest().getSession().setAttribute("menuName", "search");
+    	return SUCCESS;
+    }
+	
+	
+	/**
+	 * 初始化各变量
+	 */
+	private void initAll() {
+		this.ipaddr ="";//用于获取界面的IP地址
+		this.user = null;//用于接收SOA传回来的user对象
+		this.messString = "";//用于到界面显示错误信息
+		this.aidTimeString = "";//用于显示aidTime
+		this.lastNid = "";//用于传到SOA中的参数
+		this.lastHashMac = "";//用于传到SOA中的参数hashMac
+		this.nidGroupName = "";//用于存放NID所属学校，域内
+		this.ipGroupName = "";//用于存放IP所属学校，域间时显示
+		this.loginType = "";//登录类型，为域间out还是域内in
+		
+	}
+
+	
+	/**
+	 * 追溯查询结果
+	 * @return
+	 * @throws ParseException 
+	 * @throws Exception 
+	 */
+		public String searchresult() throws ParseException{
+			String traceResultid = getRequest().getParameter("traceResultid");
+			System.out.println("traceResultid"+ traceResultid);
+			if(null == traceResultid){
+				getRequest().getSession().removeAttribute("messages");
+			}
+			
+			Map parameters = getRequest().getParameterMap();
+			Enumeration paraNames = getRequest().getParameterNames();
+			Map paraMap = new HashMap();
+			if (getRequest().getSession().getAttribute("traceResultMap") != null) {
+	            paraMap = (Map) getRequest().getSession().getAttribute("traceResultMap");
+	            
+			}
+			paraMap = ConvertUtil.getParameterMapValues(paraMap, parameters, paraNames);
+			 String sort = "";
+		     String dir = "";
+		     //createTime = "";//创建时间
+		     if(paraMap.size()!=0){
+		    	 if (paraMap.get("page") != null) {
+		                page = Integer.parseInt(paraMap.get("page").toString());
+		            }
+		            if (paraMap.get("pagesize") != null) {
+		                pagesize = Integer.parseInt(paraMap.get("pagesize").toString());
+		            }
+		            if (paraMap.get("sort") != null) {
+		                sort = paraMap.get("sort").toString();
+		            }
+		            if (paraMap.get("dir") != null) {
+		                dir = paraMap.get("dir").toString();
+		            }
+		            if (paraMap.get("createTime") != null && !(paraMap.get("createTime").equals(""))){
+		            	createTime = DateUtil.convertStringToDate("yyyy-MM-dd", paraMap.get("createTime").toString()); ;
+		            }
+		     }
+		     
+			DetachedCriteria queryCriteria = DetachedCriteria.forClass(TraceResult.class);
+			if(null != createTime && !createTime.equals("")){
+				String createTimeString = DateUtil.convertDateToString(createTime);
+				//获取当天的00点与当天的23:59:59点时间
+				Date startTimeDate = getAidDate(createTimeString + " 00:00:00");
+				Date endTimeDate = getAidDate(createTimeString + " 23:59:59");
+	            queryCriteria.add(Restrictions.ge("createTime",startTimeDate));
+	            queryCriteria.add(Restrictions.le("createTime",endTimeDate));
+			}
+			int usertype = ((Integer) getSession().getAttribute("usertype")).intValue();
+			String userName = (String) getSession().getAttribute("username");
+			if(usertype == 1 ){//普通用户只可以看自己申请的
+				 queryCriteria.add(Restrictions.eq("addOpr",userName));
+			}
+			fullSize = traceResultManager.getCountByDetachedCriteria(queryCriteria);
+			if (!sort.equals("")) {
+	            if (dir.equals("desc")) {
+	                queryCriteria.addOrder(Order.desc(sort));
+	            } else {
+	                queryCriteria.addOrder(Order.asc(sort));
+	            }
+	        } else {
+	            queryCriteria.addOrder(Order.desc("createTime"));
+	        }
+			 if(fullSize!=0&&fullSize<=(page-1)*pagesize){
+		           if(fullSize==(page-1)*pagesize){
+		               page = fullSize/pagesize;
+		           }
+		           else{
+		               page = fullSize/pagesize+1;
+		           }
+		     }
+			 paraMap.put("page",page);
+		     getRequest().getSession().setAttribute("traceResultMap", paraMap);
+			traceResultList = traceResultManager.getListByDetachedCriteriaPage(queryCriteria,(page-1)*pagesize,pagesize);
+		     //traceLogsList = null;
+		     //分页
+			 plist = new PaginatedListImpl();
+		     plist.setPageNumber(page);
+		     plist.setObjectsPerPage(pagesize);
+		     if(dir==null||dir.equals("")||dir.equals("asc")){
+		         plist.setSortDirection(SortOrderEnum.ASCENDING);
+		     }else{
+		         plist.setSortDirection(SortOrderEnum.DESCENDING);
+		     }
+		     plist.setSortCriterion(sort);
+		     plist.setFullListSize(fullSize);
+		     plist.setList(traceResultList);
+			getRequest().getSession().setAttribute("menuName", "searchresult");
+			return SUCCESS;
+		}
+		
+
+		
+/**
+ * 查询追溯历史
+ * @return
+ * @throws Exception 
+ */
+	public String searchHistory() throws Exception{
+		//dealCreateTime();
+		Map parameters = getRequest().getParameterMap();
+		Enumeration paraNames = getRequest().getParameterNames();
+		Map paraMap = new HashMap();
+		if (getRequest().getSession().getAttribute("traceLogMap") != null) {
+            paraMap = (Map) getRequest().getSession().getAttribute("traceLogMap");
+            
+		}
+		paraMap = ConvertUtil.getParameterMapValues(paraMap, parameters, paraNames);
+		 String sort = "";
+	     String dir = "";
+	     //createTime = "";//创建时间
+	     if(paraMap.size()!=0){
+	    	 if (paraMap.get("page") != null) {
+	                page = Integer.parseInt(paraMap.get("page").toString());
+	            }
+	            if (paraMap.get("pagesize") != null) {
+	                pagesize = Integer.parseInt(paraMap.get("pagesize").toString());
+	            }
+	            if (paraMap.get("sort") != null) {
+	                sort = paraMap.get("sort").toString();
+	            }
+	            if (paraMap.get("dir") != null) {
+	                dir = paraMap.get("dir").toString();
+	            }
+	            if (paraMap.get("createTime") != null && !(paraMap.get("createTime").equals(""))){
+	            	createTime = DateUtil.convertStringToDate("yyyy-MM-dd", paraMap.get("createTime").toString()); ;
+	            }
+	     }
+	     
+		DetachedCriteria queryCriteria = DetachedCriteria.forClass(TraceLog.class);
+		if(null != createTime && !createTime.equals("")){
+			String createTimeString = DateUtil.convertDateToString(createTime);
+			//获取当天的00点与当天的23:59:59点时间
+			Date startTimeDate = getAidDate(createTimeString + " 00:00:00");
+			Date endTimeDate = getAidDate(createTimeString + " 23:59:59");
+            queryCriteria.add(Restrictions.ge("createTime",startTimeDate));
+            queryCriteria.add(Restrictions.le("createTime",endTimeDate));
+		}
+		fullSize = traceLogManager.getCountByDetachedCriteria(queryCriteria);
+		if (!sort.equals("")) {
+            if (dir.equals("desc")) {
+                queryCriteria.addOrder(Order.desc(sort));
+            } else {
+                queryCriteria.addOrder(Order.asc(sort));
+            }
+        } else {
+            queryCriteria.addOrder(Order.desc("createTime"));
+        }
+		 if(fullSize!=0&&fullSize<=(page-1)*pagesize){
+	           if(fullSize==(page-1)*pagesize){
+	               page = fullSize/pagesize;
+	           }
+	           else{
+	               page = fullSize/pagesize+1;
+	           }
+	     }
+		 paraMap.put("page",page);
+	     getRequest().getSession().setAttribute("traceLogMap", paraMap);
+		traceLogsList = traceLogManager.getListByDetachedCriteriaPage(queryCriteria,(page-1)*pagesize,pagesize);
+	     //traceLogsList = null;
+	     //分页
+		 plist = new PaginatedListImpl();
+	     plist.setPageNumber(page);
+	     plist.setObjectsPerPage(pagesize);
+	     if(dir==null||dir.equals("")||dir.equals("asc")){
+	         plist.setSortDirection(SortOrderEnum.ASCENDING);
+	     }else{
+	         plist.setSortDirection(SortOrderEnum.DESCENDING);
+	     }
+	     plist.setSortCriterion(sort);
+	     plist.setFullListSize(fullSize);
+	     plist.setList(traceLogsList);
+		getRequest().getSession().setAttribute("menuName", "history");
+		return SUCCESS;
+	}
+	
+
+
+
+	/**
+	 * 
+	 * @param naIp SOA服务器IP地址
+	 * @param suffix  IPV6后64位
+	 */
+	private void setUserInfo(String naIp,String suffix) throws Exception{
+		
+		//根据naIp到表idea中查询list列表，以创建时间倒序排序
+		try {
+			DetachedCriteria ideaCriteria = DetachedCriteria.forClass(Idea.class);
+			ideaCriteria.add(Restrictions.eq("naIp", naIp));
+			ideaCriteria.addOrder(Order.desc("startTime"));
+			List<Idea> ideaList = ideaManager.getListByDetachedCriteria(ideaCriteria);
+			if(null != ideaList && ideaList.size() > 0){
+				//获取最新密钥对后64位AID进行解密，如果得到后22位时间信息位于生成密钥的时间段内，则跳出循环，否则继续根据上一个密钥进行解密，重复动作
+				lastNid = "";
+				lastHashMac = "";
+				flag = "0";//用于标识为idea+time 1,idea+mac  2
+				for(int i = 0;i < ideaList.size();i++){
+					Idea idea = ideaList.get(i);
+					String ideaKey = idea.getIdeaKey();//使用ideaKey对后64位suffix进行解密
+					String aid = EncryptUtils.getIdeaDecrypt(suffix, ideaKey);//调用方法进行解密，返回格式为plaintext = 80002a110804ade4
+					aid = aid.split("=")[1].trim();
+					//String aid = "8000c1802a20243d";//"80002a110804ae20";测试
+					System.out.println("密钥：" + ideaKey);
+					System.out.println("解秘后的十六进制：" + aid);
+					String ideaType = idea.getIdeaType();
+					String nid = aid.substring(0,10);//nid为前10位字符串
+					String binString = StrToBinstr(aid);////将十六进制AID转为2进制字符串
+					System.out.println("十六进制转二进制：" + binString);
+					if(ideaType.equals("idea_time")){//如果类型为nid+time则拆分为40位NID+1位选择位+1位预留位+22位时间位
+						String timeStr = binString.substring(42);//截取22位时间位=分钟数，这个时间为当前时间-当前年第一天时间的分钟数
+						System.out.println("二进制分钟数timeStr = " + timeStr);
+						BigInteger minu = new BigInteger(timeStr, 2);//2进制转换为10进制分钟数
+						System.out.println("十进制分钟数minu = " + minu);
+						long minuLong = minu.longValue();
+						System.out.println("十进制分钟数minuLong = " + minuLong);
+						long timeLong = minuLong*60*1000;//转换为毫秒
+						System.out.println("十进制毫秒数timeLong = " + timeLong);
+						long curLong = getCurrYearFirst();//当前年份第一天比如2015-01-01 00:00:00毫秒数
+						System.out.println("当前年份第一天毫秒数curLong = " + curLong);
+						timeLong = timeLong + curLong;//解析出来的毫 秒数 + 2015-01-01 00:00:00之前毫秒数=现在时间的毫秒数
+						System.out.println("当前时间毫秒数timeLong = " + timeLong);
+						long startLong = idea.getStartTime().getTime();//取出开始时间毫秒数与结束时间毫秒数
+						System.out.println("开始时间毫秒数startLong = " + startLong);
+						long endLong = idea.getEndTime().getTime();
+						System.out.println("结束时间毫秒数endLong = " + endLong);
+						if(timeLong >= startLong && timeLong <= endLong){//如果timeLong在开始时间与结束时间之前，则此密钥为最新密钥，退出循环
+							System.out.println("类型idea+time");
+							lastNid = nid;
+							System.out.println("NID的值lastNid: " + lastNid);
+							aidTimeString = getAidTime(timeLong);//timeLong转换为时间时分秒yyyy-MM-dd HH:mm:ss
+							System.out.println("AID时间AIDTIME: " + aidTimeString);
+							flag = "1";//idea+time
+							break;
+						}
+							
+					}else if(ideaType.equals("idea_mac")){//40位nid+1位选择位+1位预留位+4位时间位+16位hahsmac值
+						System.out.println("idea+mac");
+						String timeStr = binString.substring(42,46);//4位时间位
+						System.out.println("4位时间位2进制："+timeStr);
+						String macStr = "0000" + binString.substring(48);//后16位为HASHMAC值
+						System.out.println("后16位HASHMAC值："+macStr);
+						int month = (new BigInteger(timeStr, 2).intValue()) + 1;//从0开始,所以month+1
+						System.out.println("10进制4位时间位："+month);
+						//取开始时间、结束时间月份，
+						int startMonth = getMonth(idea.getStartTime())+1;
+						System.out.println("开始月份："+startMonth);
+						int endMonth = getMonth(idea.getEndTime())+1;
+						System.out.println("结束月份" + endMonth);
+						//与month进行比较，如果开始时间<month<结束时间则此密钥为最新密钥，退出循环
+						if(month >= startMonth && month <= endMonth){
+							lastNid = nid;
+							System.out.println("lastNid: " + lastNid);
+							macStr = strToHex(macStr);//macStr转为16进制
+							lastHashMac = macStr;
+							System.out.println("lastMac: " + lastHashMac);
+							aidTimeString = getNidTimeMonth(month);//时间为当前年份+month YYYY-MM
+							System.out.println("AIDTIME: " + aidTimeString);
+							flag = "2";//idea+mac
+							break;
+						}
+					}
+
+				}
+				if(null != lastNid && !lastNid.equals("")){
+					
+				
+					//开始拆分NID
+					String lastNidBinString = StrToBinstr(lastNid);//StrToBinstr将lastNid转为二进制
+					String dividid = lastNidBinString.substring(0,4); //拆分lastNid为分界位4位+组织位18位+用户位18位
+					System.out.println("分界位4位：" + dividid);
+					
+					//NID灵活拆分，根据分界位到NT_NID表中查询组织位数进行截取
+					DetachedCriteria nidCriteria = DetachedCriteria.forClass(Nid.class);
+					nidCriteria.add(Restrictions.eq("didBin", dividid));
+					List<Nid> nidList = nidManager.getListByDetachedCriteria(nidCriteria);
+					int endLen = 22;//默认18
+					if(null != nidList && nidList.size() > 0){
+						Nid nid = nidList.get(0);
+						int orgDigit = nid.getOrgDigit().intValue();
+						endLen = 4 + orgDigit;
+						
+					}
+					String orgid = lastNidBinString.substring(4,endLen);
+					//String orgid = lastNidBinString.substring(4,22);
+					System.out.println("组织位：" + orgid);
+					
+					DetachedCriteria groupCriteria = DetachedCriteria.forClass(Group.class);
+					groupCriteria.add(Restrictions.eq("naIp", naIp));//根据NAIP查询该用户所在大学
+					List<Group> groupList = groupManager.getListByDetachedCriteria(groupCriteria);
+					if(null != groupList && groupList.size() > 0){
+						Group group = groupList.get(0);//一个NAIP只对应一个学校
+						String groupDividid = group.getDividId();//取出分界位
+						String groupOrgid = group.getOrgId();//取出组织位
+						
+						//与以上lastNid拆分的分界位与组织位进行比,相等则为域内访问	
+						if(dividid.equals(groupDividid) && orgid.equals(groupOrgid)){	
+							this.user = sendSoa(naIp);//访问SOA
+							System.out.println("域内访问user.port:" +this.user.getPort());
+							if(null != this.user){
+								nidGroupName = group.getGroupName();
+								this.loginType = "in";//表示域内登录
+							}
+						}else{//不相等则为域间访问
+							//根据lastNid拆分的分界位组织位取出Group中的NAIP
+							DetachedCriteria gCriteria = DetachedCriteria.forClass(Group.class);
+							gCriteria.add(Restrictions.eq("dividId", dividid));
+							gCriteria.add(Restrictions.eq("orgId", orgid));
+							List<Group> gList = groupManager.getListByDetachedCriteria(gCriteria);
+							if(null != gList && gList.size() > 0){
+								String groupNaIp = gList.get(0).getNaIp();//只有一条
+								
+								//判断是idea+time还是idea+mac
+								if(flag.equals("1")){//flag为1表示idea+time
+									//idea+time时只需要访问服务器地址为naIp,groupNaIp取user信息
+									User portUser = sendSoa(naIp);//1. naIp访问获取port信息
+									System.out.println("postUser  ipAddr" + portUser.getIpAddr());
+									this.user = sendSoa(groupNaIp);
+									if(null != this.user){
+										this.user.setPort(portUser.getPort());
+										this.user.setIpAddr(portUser.getIpAddr());
+										this.user.setApName(portUser.getApName());
+									}
+									System.out.println("域间访问 idea+time  user.ipAddr" + this.user.getIpAddr());
+									System.out.println("域间访问 idea+time  user.port:" +this.user.getPort());
+								}else if(flag.equals("2")){//flag为2表示 idea+mac
+									//idea+mac时需要访问2次服务器地址，
+									User macUser = sendSoa(naIp);//1. naIp访问获取mac信息
+									System.out.println("域间访问 idea+mac  macUser.mac:" + macUser.getMacAddr());
+									System.out.println("域间访问 port :" + macUser.getPort());
+									System.out.println("域间访问 idea+mac  groupNaIp:" + groupNaIp);
+									this.user = sendSoa(groupNaIp);//2. groupNaIp访问获取user相关信息
+									System.out.println("域间访问 idea+mac  user.port:" +this.user.getPort());
+									if(null != this.user){
+										this.user.setMacAddr(macUser.getMacAddr());//将naIp访问获取mac信息存储到user中
+										this.user.setPort(macUser.getPort());
+										this.user.setIpAddr(macUser.getIpAddr());
+										this.user.setApName(macUser.getApName());
+									}
+								}
+								if(null != this.user){
+									nidGroupName =  gList.get(0).getGroupName();//域间登录nidGroupName
+									ipGroupName = group.getGroupName();
+									this.loginType = "out";//表示域间登录
+								}
+							}
+							
+						}
+						
+						if(null != this.user){
+							if(null != this.user.getUserName() && !this.user.getUserName().equals("")){
+	
+								//保存日志信息
+								TraceLog traceLog = new TraceLog();
+								traceLog.setTracedIp(ipaddr);//管理员所输IP
+								traceLog.setTracedMachash(lastHashMac);//解密得到的hashmac
+								traceLog.setNid(lastNid);//解密得到的nid
+								traceLog.setDid(this.user.getUserName());//soa返回的DID
+								traceLog.setNidGroupName(nidGroupName);//保存哪个NIDGROUPNAME
+								traceLog.setIpGroupName(ipGroupName);//域间保存IPGROUPNAME
+								if(flag.equals("1")){//idea+time
+									traceLog.setTimeDate(aidTimeString);
+								}else if(flag.equals("2")){//idea+mac
+									//String curAidTimeString = aidTimeString + "-01 00:00:00";
+									traceLog.setTimeDate(aidTimeString);
+								}
+								traceLog.setMac(this.user.getMacAddr());// soa返回的MAC
+								traceLog.setCreateTime(new Date());
+								String userName = (String) getSession().getAttribute("username");
+								traceLog.setAuditOpr(userName);
+								if(null != this.loginType && !(this.loginType.equals(""))){
+									if(this.loginType.equals("in")){
+										traceLog.setTraceType("域内登录");
+									}else{
+										traceLog.setTraceType("域间登录");
+									}
+								}
+								if(null != this.user){
+									if(null != this.user.getPort() && this.user.getPort() == 0){
+										traceLog.setPort(null);
+									}else if(null != this.user.getPort() && this.user.getPort() != 0){
+										traceLog.setPort( this.user.getPort());
+									}
+									
+								}
+								
+								traceLogManager.save(traceLog);
+							}
+						}else{
+							setMessString("您的查询结果为空");
+							getRequest().getSession().removeAttribute("messages");
+							saveMessage("追溯结果为空");
+						}
+						
+					}else{
+						setMessString("您的查询结果为空");
+						getRequest().getSession().removeAttribute("messages");
+						saveMessage("追溯结果为空");
+					}
+				}else{
+					setMessString("您的查询结果为空");
+					getRequest().getSession().removeAttribute("messages");
+					saveMessage("追溯结果为空");
+				}
+				
+				
+			}else{
+				setMessString("您的查询结果为空");
+				getRequest().getSession().removeAttribute("messages");
+				saveMessage("追溯结果为空");
+			}
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			setMessString("您的查询结果为空");
+			getRequest().getSession().removeAttribute("messages");
+			saveMessage("追溯结果为空");
+		}
+	}
+	
+	/**
+	 * 
+	 * @param ipAddr 追溯管理服务器的IP地址
+	 * @return USER用户信息
+	 */
+	private User sendSoa(String ipAddr) throws Exception{
+		
+		User soaUser = null;
+		try {
+			soaUser = null;
+			if((null != lastNid && !lastNid.equals(""))||(null != lastHashMac && !lastHashMac.equals(""))){
+				String soaUrlString = Config.getValue("soa.url");
+				//调用soa，根据nid查询user列表
+				String urlString = "http://" + ipAddr + ":8080/" + soaUrlString;
+				JaxWsProxyFactoryBean svr = new JaxWsProxyFactoryBean();
+				svr.setServiceClass(NidServer.class);
+				svr.setAddress(urlString);
+				NidServer nidServer = (NidServer) svr.create();
+				CXFClientUtil.configTimeout(nidServer);
+				String userString = nidServer.tracebackNID(lastNid, lastHashMac,ipaddr);
+				//String userString = nidServer.tracebackNID("8000294619", "");
+				System.out.println("返回的json串：" + userString);
+				if(null != userString && !userString.equals("")){
+					soaUser = new User();
+					JSONObject jsonobject = JSONObject.fromObject(userString);//转换为对象
+					soaUser = (User)JSONObject.toBean(jsonobject, User.class);
+					System.out.println("返回的json串中的port：" + soaUser.getPort());
+					
+				}
+				
+			}
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			return soaUser;
+		}
+		return soaUser;
+	}
+	
+	public static void main(String args[]){
+		
+		String urlString = "http://211.68.122.64:8080/nidadmin/nidServer?wsdl";
+		JaxWsProxyFactoryBean svr = new JaxWsProxyFactoryBean();
+		svr.setServiceClass(NidServer.class);
+		svr.setAddress(urlString);
+		NidServer nidServer = (NidServer) svr.create();
+		//String userString = nidServer.tracebackNID("8000c38e50", "0cfca","2001:da8:266:f501:bfba:1f2b:acd0:e671");
+		String userString = nidServer.tracebackNID("800029d290", null,"2001:da8:266:f501:3126:768b:6235:5db0");
+		System.out.println("返回的json串：" + userString);
+	}
+	/**
+	 * 
+	 * @param month 月份
+	 * @return 当前年份+month 格式为yyyy-mm
+	 */
+	private String getNidTimeMonth(int month) {
+		String dateString =  "-" + month + "";
+		Calendar currCal=Calendar.getInstance();   
+		int currentYear = currCal.get(Calendar.YEAR); 
+		dateString = currentYear + dateString;
+		return dateString;
+	}
+
+
+	/**
+	 * 
+	 * @param timeLong 日期的毫秒数
+	 * @return 日期的String类型，格式为yyyy-MM-dd HH:mm:ss
+	 */
+	private String getAidTime(long timeLong) {
+		String dateString = "";
+		Date date = new Date(timeLong);
+		SimpleDateFormat sdf =   new SimpleDateFormat( "yyyy-MM-dd HH:mm" );
+		dateString = sdf.format(date);
+		return dateString; 
+	}
+
+	/**
+	 * 
+	 * @param dateString 格式为yyyy-MM-dd HH:mm:ss
+	 * @return 日期型数据
+	 */
+	private Date getAidDate(String dateString) {
+		Date date = null;
+		try {
+			SimpleDateFormat sdf =   new SimpleDateFormat( "yyyy-MM-dd HH:mm:ss" );
+			date = sdf.parse(dateString);
+		} catch (ParseException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		 return date; 
+	}
+
+	/**
+	 * 
+	 * @return 当前年份第一天的毫秒数 比如：2015-01-01 00:00:00
+	 */
+	private  long getCurrYearFirst(){ 
+		 Calendar currCal=Calendar.getInstance();   
+		 int currentYear = currCal.get(Calendar.YEAR); 
+		 return getYearFirst(currentYear); 
+	} 
+
+
+	/**
+	 * 
+	 * @param year 年份
+	 * @return 当前年份第一天的毫秒数
+	 */
+	private  long getYearFirst(int year){  
+		Date date = null;
+		try {
+			String dateString = year + "-" + "01-01 " + "00:00:00";
+			SimpleDateFormat sdf =   new SimpleDateFormat( "yyyy-MM-dd HH:mm:ss" );
+			date = sdf.parse(dateString);
+		} catch (ParseException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		 return date.getTime(); 
+	} 
+	
+	/**
+	 * 
+	 * @param date 日期
+	 * @return 月份
+	 */
+	private int getMonth(Date date){
+		Calendar currCal=Calendar.getInstance();
+		currCal.setTime(date);
+		int currentmonth = currCal.get(Calendar.MONTH);
+		return currentmonth;
+		
+	}
+	
+	/**
+	 * 
+	 * @param ipv6Addr IPV6后64位 例如：200:0:feb0:0
+	 * @return 冒号间不足4位补前导0 例如：0200:0000:feb0:0000
+	 */
+	private String getSuffix(String ipv6Addr) {
+		String suffix = "";
+		String[] ipv6ArrayString = ipv6Addr.split(":");
+		for(int i = 4;i < 8;i++){
+			String str = "";
+			if(ipv6ArrayString[i].length() < 4){//长度少于4
+				for(int j = 0;j < 4 - ipv6ArrayString[i].length();j++){//在前面补0
+					str = str + "0";
+				}
+			}
+			suffix += str + ipv6ArrayString[i];
+		}
+		return suffix;
+	}
+
+	/**
+	 * 
+	 * @param ipv6Addr IPV6前64位例如：2001:da8:0:b255：
+	 * @return 去掉冒号间的0与前导0  例如： 2001:da8::b255：
+	 */
+	private String getPrefix(String ipv6Addr) {
+		String prefix = "";
+		String[] ipv6ArrayString = ipv6Addr.split(":");
+		for(int i = 0;i < 4;i++){
+			
+			if( ipv6ArrayString[i].equals("0")){
+				prefix += ":";
+			}else{
+				prefix += ipv6ArrayString[i] + ":";
+			}
+		}
+		return prefix;
+	}
+		
+
+	/**
+	 * 
+	 * @param str 16 进制字符串
+	 * @return 2进制字符串
+	 */
+	private String StrToBinstr(String str) {
+	    char[] strChar=str.toCharArray();
+	    String result="";
+	    for(int i=0;i<strChar.length;i++){
+	    	//String intString = Integer.valueOf(String.valueOf(strChar[i]),16).toString();
+	    	//int charint = Integer.parseInt(intString);
+	    	String charstr = Long.toBinaryString(Long.parseLong(String.valueOf(strChar[i]), 16));//16进制转2进制
+	    	String charstrnew = charstr;
+	    	if(charstr.length() < 4){
+	    		for(int j = 0;j < 4-charstr.length();j++){
+	    			charstrnew = "0" + charstrnew;
+	    		}
+	    	}
+	    	System.out.println(charstrnew);
+	        result += charstrnew;
+	    }
+	    return result;
+	}
+
+	/**
+	 * 
+	 * @param str  2进制字符串
+	 * @return 16进制字符串
+	 */
+	private String strToHex(String str){
+		String result="";
+		 int size = str.length()/4;
+		 for(int i = 0;i < size ;i++){
+			 String curString = str.substring(i*4,(i+1)*4);
+			 System.out.println(curString);
+			 result = result + Long.toHexString(Long.parseLong(curString,2));
+		 }
+		return result;
+	}
+
+	public IdeaManager getIdeaManager() {
+		return ideaManager;
+	}
+
+
+	public void setIdeaManager(IdeaManager ideaManager) {
+		this.ideaManager = ideaManager;
+	}
+
+
+	public DomainManager getDomainManager() {
+		return domainManager;
+	}
+
+
+	public void setDomainManager(DomainManager domainManager) {
+		this.domainManager = domainManager;
+	}
+
+
+	
+	public TraceLogManager getTraceLogManager() {
+		return traceLogManager;
+	}
+
+
+	public void setTraceLogManager(TraceLogManager traceLogManager) {
+		this.traceLogManager = traceLogManager;
+	}
+
+
+	public TraceResultManager getTraceResultManager() {
+		return traceResultManager;
+	}
+	public void setTraceResultManager(TraceResultManager traceResultManager) {
+		this.traceResultManager = traceResultManager;
+	}
+	public String getMessString() {
+		return messString;
+	}
+
+
+	public void setMessString(String messString) {
+		this.messString = messString;
+	}
+
+
+	public User getUser() {
+		return user;
+	}
+	public void setUser(User user) {
+		this.user = user;
+	}
+
+
+	public String getIpaddr() {
+		return ipaddr;
+	}
+
+
+	public void setIpaddr(String ipaddr) {
+		this.ipaddr = ipaddr;
+	}
+
+
+	
+
+
+	public String getLastNid() {
+		return lastNid;
+	}
+
+
+	public void setLastNid(String lastNid) {
+		this.lastNid = lastNid;
+	}
+
+
+	
+
+
+	public String getLastHashMac() {
+		return lastHashMac;
+	}
+
+
+	public void setLastHashMac(String lastHashMac) {
+		this.lastHashMac = lastHashMac;
+	}
+
+
+	public GroupManager getGroupManager() {
+		return groupManager;
+	}
+
+
+	public void setGroupManager(GroupManager groupManager) {
+		this.groupManager = groupManager;
+	}
+
+
+	public NidManager getNidManager() {
+		return nidManager;
+	}
+	public void setNidManager(NidManager nidManager) {
+		this.nidManager = nidManager;
+	}
+	public String getAidTimeString() {
+		return aidTimeString;
+	}
+
+
+	public void setAidTimeString(String aidTimeString) {
+		this.aidTimeString = aidTimeString;
+	}
+
+
+	
+
+
+	public String getNidGroupName() {
+		return nidGroupName;
+	}
+
+
+	public void setNidGroupName(String nidGroupName) {
+		this.nidGroupName = nidGroupName;
+	}
+
+
+	public String getLoginType() {
+		return loginType;
+	}
+
+
+	public void setLoginType(String loginType) {
+		this.loginType = loginType;
+	}
+
+
+	public String getIpGroupName() {
+		return ipGroupName;
+	}
+
+
+	public void setIpGroupName(String ipGroupName) {
+		this.ipGroupName = ipGroupName;
+	}
+
+
+	public List<TraceLog> getTraceLogsList() {
+		return traceLogsList;
+	}
+
+
+	public void setTraceLogsList(List<TraceLog> traceLogsList) {
+		this.traceLogsList = traceLogsList;
+	}
+
+
+	public int getPage() {
+		return page;
+	}
+
+
+	public void setPage(int page) {
+		this.page = page;
+	}
+
+
+	public int getFullSize() {
+		return fullSize;
+	}
+
+
+	public void setFullSize(int fullSize) {
+		this.fullSize = fullSize;
+	}
+
+
+	public PaginatedListImpl getPlist() {
+		return plist;
+	}
+
+
+	public void setPlist(PaginatedListImpl plist) {
+		this.plist = plist;
+	}
+
+
+	public Date getCreateTime() {
+		return createTime;
+	}
+
+
+	public void setCreateTime(Date createTime) {
+		this.createTime = createTime;
+	}
+
+
+	public String getFlag() {
+		return flag;
+	}
+
+
+	public void setFlag(String flag) {
+		this.flag = flag;
+	}
+	public TraceResult getTraceResult() {
+		return traceResult;
+	}
+	public void setTraceResult(TraceResult traceResult) {
+		this.traceResult = traceResult;
+	}
+	public List<TraceResult> getTraceResultList() {
+		return traceResultList;
+	}
+	public void setTraceResultList(List<TraceResult> traceResultList) {
+		this.traceResultList = traceResultList;
+	}
+
+	
+	
+	
+}

@@ -1,0 +1,86 @@
+/*
+ * To change this template, choose Tools | Templates
+ * and open the template in the editor.
+ */
+package com.cernet.web.action;
+
+import java.util.List;
+
+import org.hibernate.criterion.DetachedCriteria;
+import org.hibernate.criterion.Restrictions;
+
+import com.cernet.model.Admin;
+import com.cernet.service.AdminManager;
+import com.cernet.service.LoginManager;
+import com.cernet.util.Md5;
+
+
+/**
+ *
+ * @author Administrator
+ */
+public class LoginAction extends BaseAction{
+	private LoginManager loginManager;
+	private AdminManager adminManager;
+	private String message ;
+
+
+
+	public String login() throws Exception {
+    	String username = getRequest().getParameter("username");
+    	String passwd = getRequest().getParameter("passwd");
+        if(username != null && !"".equals(username) && passwd != null && !"".equals(passwd)){
+        	Admin currentUser = null;
+        	DetachedCriteria queryCriteria = DetachedCriteria.forClass(Admin.class);
+    		queryCriteria.add(Restrictions.eq("adminName", username));
+    		List<Admin> list = adminManager.getListByDetachedCriteria(queryCriteria);
+    		if(list != null && list.size() != 0){
+    			currentUser = list.get(0);
+    		} 
+        	if(currentUser != null && currentUser.getStatus()==0 && currentUser.getPasswd().trim().equals(Md5.MD5(passwd))){
+        		getSession().setAttribute("username", username);
+            	getSession().setAttribute("passwd", passwd);
+            	return SUCCESS;
+        	}else{
+        		message ="用户名密码不正确";
+        		return ERROR;
+        	}
+        } else {
+        	message = "";
+            return ERROR;
+        }
+    }
+	
+	public String loginOut(){
+		getSession().removeAttribute("username");
+		getSession().removeAttribute("passwd");
+		return SUCCESS;
+	}
+	
+	//跳转注册页面
+	public String register(){
+		return SUCCESS;
+	}
+
+	//set and get method
+	public void setLoginManager(LoginManager loginManager) {
+		this.loginManager = loginManager;
+	}
+	
+	
+	public AdminManager getAdminManager() {
+		return adminManager;
+	}
+
+	public void setAdminManager(AdminManager adminManager) {
+		this.adminManager = adminManager;
+	}
+
+	public String getMessage() {
+		return message;
+	}
+
+	public void setMessage(String message) {
+		this.message = message;
+	}
+}
