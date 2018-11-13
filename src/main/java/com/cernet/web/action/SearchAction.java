@@ -191,6 +191,9 @@ public class SearchAction extends BaseAction{
 		String prefix = getPrefix(ipAddress);//前缀共64位用:号分隔，冒号与冒号间存在0不显示
 		String suffix = getSuffix(ipAddress);//后缀共64位，每个冒号之前默认4位，不足4位在前面补0
 		
+		// ****************************To remove********************************************
+		System.out.println("Come to traceresult");
+		// *********************************************************************************
 	    System.out.println("前缀64prefix: "+prefix);
 	    System.out.println("后缀64suffix: "+suffix);
 	    //根据前缀64位到domain表中找对应的naIP
